@@ -7,16 +7,34 @@
 <script src="data.js"></script>
 <style>
 html,body,#map{height:100%;margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif}
-#panel{position:absolute;top:10px;right:10px;z-index:1000;background:rgba(20,20,24,.88);color:#eee;padding:10px 12px;border-radius:8px;width:290px;font-size:13px;max-height:95vh;overflow:auto}
-#panel h3{margin:4px 0 6px;font-size:14px}#panel label{display:block;margin:2px 0}
+#panel{position:absolute;top:10px;right:10px;z-index:1000;background:rgba(20,20,24,.88);color:#eee;border-radius:8px;width:290px;font-size:13px;max-height:95vh;overflow:auto;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+#panel-toggle{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px;padding:10px 12px;background:transparent;border:0;color:#eee;cursor:pointer;font:inherit;text-align:left}
+#panel-toggle:hover{background:rgba(255,255,255,.06)}
+#panel-toggle strong{font-size:14px}
+#panel-chevron{flex:0 0 auto;width:1.1em;text-align:center;opacity:.85;transition:transform .15s ease}
+#panel.collapsed #panel-chevron{transform:rotate(-90deg)}
+#panel-body{padding:0 12px 10px}
+#panel.collapsed #panel-body{display:none}
+#panel h3{margin:10px 0 6px;font-size:14px}
+#panel label{display:block;margin:2px 0}
 #panel input[type=range]{width:100%}
-.row{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0}.row button{flex:1;min-width:40px;padding:3px 0;background:#333;color:#eee;border:1px solid #555;border-radius:4px;cursor:pointer}
-.row button:hover{background:#444}#readout{font-family:monospace;font-size:12px;background:#000;padding:4px;border-radius:4px;white-space:pre-wrap}
+.row{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0}
+.row button{flex:1;min-width:40px;padding:3px 0;background:#333;color:#eee;border:1px solid #555;border-radius:4px;cursor:pointer}
+.row button:hover{background:#444}
+#readout{font-family:monospace;font-size:12px;background:#000;padding:4px;border-radius:4px;white-space:pre-wrap}
 .sw{display:inline-block;width:12px;height:12px;margin-right:4px;vertical-align:-1px}
 small{color:#aaa}
+#panel a{color:#7ec8ff}
+#panel a:hover{color:#b6e0ff}
+.links{display:flex;flex-direction:column;gap:4px;margin:4px 0 2px}
 </style></head><body>
 <div id="map"></div>
 <div id="panel">
+<button type="button" id="panel-toggle" aria-expanded="true" aria-controls="panel-body">
+  <strong>Layers &amp; controls</strong>
+  <span id="panel-chevron" aria-hidden="true">▾</span>
+</button>
+<div id="panel-body">
 <h3>Layers</h3>
 <label><input type="checkbox" id="lMap" checked> <span class="sw" style="background:#ff0"></span>Official EV 2026 map (image)</label>
 <label><input type="checkbox" id="lLine" checked> <span class="sw" style="background:#ff2828"></span>EV 2026 line (traced, ~1.22 km)</label>
@@ -38,9 +56,26 @@ small{color:#aaa}
 <div class="row"><button data-a="ccw">⟲ rot</button><button data-a="cw">rot ⟳</button><button data-a="sd">scale −</button><button data-a="su">scale +</button></div>
 <div class="row"><button data-a="reset">Reset target</button></div>
 <div id="readout"></div>
+<h3>Assetto Corsa map</h3>
+<div class="links">
+  <a href="ac_topdown.png" target="_blank" rel="noopener">AC top-down map (north up)</a>
+  <a href="ac_track.geojson" target="_blank" rel="noopener">AC track GeoJSON</a>
+  <a href="https://www.overtake.gg/downloads/authors/tomhbehrendt.294819/" target="_blank" rel="noopener">Download fsae_michigan18 (OverTake)</a>
+</div>
 <small>AC track is placed by its own embedded GoogleMap ground texture (walls match the real oval). EV map: 30 ft grid fitted to the back-straight pavement edges and crossings at Gate 50 / Gate 12 (±5 m). Imagery: Esri World Imagery, GeoEye-1, 30 Jun 2019. Shortcuts: arrow keys move, [ ] rotate, - = scale.</small>
 </div>
+</div>
 <script>
+const panel=document.getElementById('panel');
+const panelToggle=document.getElementById('panel-toggle');
+function setPanelCollapsed(collapsed){
+  panel.classList.toggle('collapsed',collapsed);
+  panelToggle.setAttribute('aria-expanded',String(!collapsed));
+  try{localStorage.setItem('fsae-panel-collapsed',collapsed?'1':'0');}catch(e){}
+}
+panelToggle.onclick=()=>setPanelCollapsed(!panel.classList.contains('collapsed'));
+try{if(localStorage.getItem('fsae-panel-collapsed')==='1')setPanelCollapsed(true);}catch(e){}
+
 const map=L.map('map',{maxZoom:21,zoomSnap:0.25}).setView([42.0668,-84.2392],17);
 const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:21,attribution:'Imagery © Esri, Maxar/Vantor, Earthstar Geographics'}).addTo(map);
 // local metric helpers

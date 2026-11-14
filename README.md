@@ -4,7 +4,9 @@ Interactive satellite overlay comparing the official **FSAE Electric 2026 Endura
 
 **Live map:** [https://kithek.github.io/fsae-ev-endurance-map/](https://kithek.github.io/fsae-ev-endurance-map/)
 
-Open the page, toggle layers (official EV line, AC roads/cones/walls, IC comparison), adjust opacity, and nudge placement with the on-screen controls or arrow keys.
+Open the page, toggle layers (official EV line, AC roads/cones/walls, IC comparison), adjust opacity, and nudge placement with the on-screen controls or arrow keys. The layers panel is collapsible (click the header; state is remembered).
+
+**Assetto Corsa map:** [top-down render](https://kithek.github.io/fsae-ev-endurance-map/ac_topdown.png) · [track GeoJSON](https://kithek.github.io/fsae-ev-endurance-map/ac_track.geojson) · [download `fsae_michigan18` on OverTake](https://www.overtake.gg/downloads/authors/tomhbehrendt.294819/)
 
 ## What you can see
 
