@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>FSAE Michigan EV 2026 Endurance – satellite overlay vs Assetto Corsa track</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="data.js"></script>
+<style>
+html,body,#map{height:100%;margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif}
+#panel{position:absolute;top:10px;right:10px;z-index:1000;background:rgba(20,20,24,.88);color:#eee;padding:10px 12px;border-radius:8px;width:290px;font-size:13px;max-height:95vh;overflow:auto}
+#panel h3{margin:4px 0 6px;font-size:14px}#panel label{display:block;margin:2px 0}
+#panel input[type=range]{width:100%}
+.row{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0}.row button{flex:1;min-width:40px;padding:3px 0;background:#333;color:#eee;border:1px solid #555;border-radius:4px;cursor:pointer}
+.row button:hover{background:#444}#readout{font-family:monospace;font-size:12px;background:#000;padding:4px;border-radius:4px;white-space:pre-wrap}
+.sw{display:inline-block;width:12px;height:12px;margin-right:4px;vertical-align:-1px}
+small{color:#aaa}
+</style></head><body>
+<div id="map"></div>
+<div id="panel">
+<h3>Layers</h3>
+<label><input type="checkbox" id="lMap" checked> <span class="sw" style="background:#ff0"></span>Official EV 2026 map (image)</label>
+<label><input type="checkbox" id="lLine" checked> <span class="sw" style="background:#ff2828"></span>EV 2026 line (traced, ~1.22 km)</label>
+<label><input type="checkbox" id="lIC"> <span class="sw" style="background:#fc6"></span>IC 2026 line (for comparison)</label>
+<label><input type="checkbox" id="lICimg"> <span class="sw" style="background:#aa0"></span>IC 2026 map (image)</label>
+<label><input type="checkbox" id="lRoad" checked> <span class="sw" style="background:#f0f"></span>AC road ROAD_4</label>
+<label><input type="checkbox" id="lPhys"> <span class="sw" style="background:#0cf"></span>AC physics 1ROAD_3</label>
+<label><input type="checkbox" id="lCone" checked> <span class="sw" style="background:#f90"></span>AC cones (496)</label>
+<label><input type="checkbox" id="lWall"> <span class="sw" style="background:#ddd"></span>AC walls (oval)</label>
+<label><input type="checkbox" id="lSpot"> <span class="sw" style="background:#fff"></span>AC start/pit/timing spots</label>
+<h3>Opacity</h3>
+<label>Official map image <input type="range" id="oMap" min="0" max="1" step="0.05" value="0.8"></label>
+<label>AC layers <input type="range" id="oAC" min="0" max="1" step="0.05" value="0.7"></label>
+<label>Satellite <input type="range" id="oSat" min="0" max="1" step="0.05" value="1"></label>
+<h3>Fine-tune (nudge)</h3>
+<label>Target: <select id="tgt"><option value="ac">AC track</option><option value="off">EV official map + line</option></select></label>
+<label>Step: <select id="step"><option>0.25</option><option selected>1</option><option>5</option></select> m / ×0.1° / ×0.1%</label>
+<div class="row"><button data-a="n">N ↑</button><button data-a="s">S ↓</button><button data-a="w">W ←</button><button data-a="e">E →</button></div>
+<div class="row"><button data-a="ccw">⟲ rot</button><button data-a="cw">rot ⟳</button><button data-a="sd">scale −</button><button data-a="su">scale +</button></div>
+<div class="row"><button data-a="reset">Reset target</button></div>
+<div id="readout"></div>
+<small>AC track is placed by its own embedded GoogleMap ground texture (walls match the real oval). EV map: 30 ft grid fitted to the back-straight pavement edges and crossings at Gate 50 / Gate 12 (±5 m). Imagery: Esri World Imagery, GeoEye-1, 30 Jun 2019. Shortcuts: arrow keys move, [ ] rotate, - = scale.</small>
+</div>
+<script>
+const map=L.map('map',{maxZoom:21,zoomSnap:0.25}).setView([42.0668,-84.2392],17);
+const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:21,attribution:'Imagery © Esri, Maxar/Vantor, Earthstar Geographics'}).addTo(map);
+// local metric helpers
+const R=6378137;
+function toEN(ll,p){return [(ll[1]-p[1])*Math.PI/180*R*Math.cos(p[0]*Math.PI/180),(ll[0]-p[0])*Math.PI/180*R];}
+function toLL(en,p){return [p[0]+en[1]/R*180/Math.PI,p[1]+en[0]/(R*Math.cos(p[0]*Math.PI/180))*180/Math.PI];}
+const T={ac:{rot:0,dx:0,dy:0,s:1,pivot:ACPIVOT},off:{rot:0,dx:0,dy:0,s:1,pivot:[(MAPCORNERS.tr[0]+MAPCORNERS.bl[0])/2,(MAPCORNERS.tr[1]+MAPCORNERS.bl[1])/2]}};
+function tf(ll,t){const e=toEN(ll,t.pivot),a=-t.rot*Math.PI/180;const x=t.s*(e[0]*Math.cos(a)-e[1]*Math.sin(a))+t.dx,y=t.s*(e[0]*Math.sin(a)+e[1]*Math.cos(a))+t.dy;return toLL([x,y],t.pivot);}
+// rotated image overlay
+const RotImg=L.Layer.extend({initialize(url,c){this.url=url;this.c=c;this.op=0.8},
+ onAdd(m){this.m=m;const i=this.img=L.DomUtil.create('img','leaflet-zoom-hide');i.src=this.url;Object.assign(i.style,{position:'absolute',left:0,top:0,transformOrigin:'0 0',pointerEvents:'none',opacity:this.op});m.getPanes().overlayPane.appendChild(i);i.onload=()=>this.reset();m.on('zoomend viewreset moveend',this.reset,this);this.reset()},
+ onRemove(m){this.img.remove();m.off('zoomend viewreset moveend',this.reset,this)},
+ setCorners(c){this.c=c;this.reset()},setOpacity(o){this.op=o;if(this.img)this.img.style.opacity=o},
+ reset(){const i=this.img;if(!i||!i.naturalWidth)return;const m=this.m,p0=m.latLngToLayerPoint(this.c.tl),p1=m.latLngToLayerPoint(this.c.tr),p2=m.latLngToLayerPoint(this.c.bl),w=i.naturalWidth,h=i.naturalHeight;
+  i.style.width=w+'px';i.style.height=h+'px';i.style.transform=`matrix(${(p1.x-p0.x)/w},${(p1.y-p0.y)/w},${(p2.x-p0.x)/h},${(p2.y-p0.y)/h},${p0.x},${p0.y})`}});
+const offImg=new RotImg('official_ev_endurance_2026_transparent.png',MAPCORNERS).addTo(map);
+const icImg=new RotImg('official_endurance_2026_transparent.png',ICCORNERS);icImg.setOpacity(0.6);
+const icLine=L.geoJSON(ICLINE,{style:{color:'#fc6',weight:2,dashArray:'6 4'}});
+function mapCoords(g,f){const c=g.coordinates;const P=a=>f([a[1],a[0]]).reverse();
+ if(g.type=='Point')return{type:g.type,coordinates:P(c)};if(g.type=='LineString'||g.type=='MultiPoint')return{type:g.type,coordinates:c.map(P)};
+ if(g.type=='Polygon')return{type:g.type,coordinates:c.map(r=>r.map(P))};return g;}
+let acOp=0.7;const groups={};
+const styleOf={road:{color:'#f0f',weight:2,fillOpacity:.25},phys:{color:'#0cf',weight:1.5,fillOpacity:.08,dashArray:'4 4'}};
+function buildAC(){for(const k in groups)if(groups[k])map.removeLayer(groups[k]);
+ const by={road:[],phys:[],cone:[],wall:[],spot:[]};for(const f of ACTRACK.features)by[f.properties.layer].push({...f,geometry:mapCoords(f.geometry,ll=>tf(ll,T.ac))});
+ for(const k in by){groups[k]=L.geoJSON({type:'FeatureCollection',features:by[k]},{style:()=>({...styleOf[k],opacity:acOp,fillOpacity:(styleOf[k]||{}).fillOpacity*acOp/0.7}),
+  pointToLayer:(f,ll)=>k=='spot'?L.circleMarker(ll,{radius:4,color:'#fff',weight:1,fillOpacity:acOp,opacity:acOp}).bindTooltip(f.properties.name):L.circleMarker(ll,{radius:k=='wall'?1.2:2.5,stroke:false,fillColor:k=='wall'?'#ddd':(f.properties.color=='blue'?'#36f':'#f90'),fillOpacity:acOp})});}
+ sync();}
+let lineLayer;function buildLine(){if(lineLayer)map.removeLayer(lineLayer);lineLayer=L.geoJSON({...OFFICIAL,geometry:mapCoords(OFFICIAL.geometry,ll=>tf(ll,T.off))},{style:{color:'#ff2828',weight:3}});
+ offImg.setCorners({tl:tf(MAPCORNERS.tl,T.off),tr:tf(MAPCORNERS.tr,T.off),bl:tf(MAPCORNERS.bl,T.off)});sync();}
+const chk={lMap:()=>offImg,lLine:()=>lineLayer,lRoad:()=>groups.road,lPhys:()=>groups.phys,lCone:()=>groups.cone,lWall:()=>groups.wall,lSpot:()=>groups.spot,lIC:()=>icLine,lICimg:()=>icImg};
+function sync(){for(const id in chk){const l=chk[id]();if(!l)continue;const on=document.getElementById(id).checked;if(on&&!map.hasLayer(l))l.addTo(map);if(!on&&map.hasLayer(l))map.removeLayer(l);}readout();}
+for(const id in chk)document.getElementById(id).onchange=sync;
+oMap.oninput=e=>offImg.setOpacity(+e.target.value);oAC.onchange=e=>{acOp=+e.target.value;buildAC()};oSat.oninput=e=>sat.setOpacity(+e.target.value);
+function readout(){const f=t=>`rot ${t.rot.toFixed(2)}° E ${t.dx.toFixed(2)} m  N ${t.dy.toFixed(2)} m scale ${(t.s*100).toFixed(2)}%`;document.getElementById('readout').textContent='AC : '+f(T.ac)+'\nOFF: '+f(T.off);}
+function act(a){const t=T[tgt.value],s=+step.value;({n:()=>t.dy+=s,s:()=>t.dy-=s,e:()=>t.dx+=s,w:()=>t.dx-=s,cw:()=>t.rot+=0.1*s,ccw:()=>t.rot-=0.1*s,su:()=>t.s*=1+0.001*s,sd:()=>t.s/=1+0.001*s,reset:()=>Object.assign(t,{rot:0,dx:0,dy:0,s:1})})[a]();tgt.value=='ac'?buildAC():buildLine();}
+document.querySelectorAll('.row button').forEach(b=>b.onclick=()=>act(b.dataset.a));
+document.addEventListener('keydown',e=>{const k={ArrowUp:'n',ArrowDown:'s',ArrowLeft:'w',ArrowRight:'e','[':'ccw',']':'cw','-':'sd','=':'su'}[e.key];if(k&&e.target.tagName!='SELECT'){act(k);e.preventDefault();}});
+buildAC();buildLine();
+</script></body></html>
