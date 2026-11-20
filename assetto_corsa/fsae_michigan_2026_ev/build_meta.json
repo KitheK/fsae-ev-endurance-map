@@ -1,5 +1,11 @@
 {
   "lap_m": 1218.0778870401825,
   "meshes": 7,
-  "cones": 1065
+  "cones_orange": 385,
+  "cones_blue": 2,
+  "cone_on_line_m": 2,
+  "cone_edge_m": 367,
+  "cones_within_spot_clear_m": 0,
+  "spot_clear_m": 6.0,
+  "cone_mesh_visual_only": true
 }

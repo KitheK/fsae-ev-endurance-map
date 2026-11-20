@@ -25,7 +25,7 @@ Requirements: Python 3.10+, `numpy`, `Pillow`, `shapely`.
 
 ```bash
 pip install numpy pillow shapely
-python3 scripts/extract_ev_cones.py      # reads official_ev_endurance_2026.png
+python3 scripts/extract_ev_cones.py      # dark linework on official map (excludes red racing line)
 python3 scripts/build_fsae_ev_track.py   # writes assetto_corsa/fsae_michigan_2026_ev/
 ```
 
@@ -33,7 +33,7 @@ Validation images are written to [`artifacts/`](artifacts/) (`check_satellite_an
 
 ### Track contents & limitations
 
-- **Programmatic kn5 (v5)** via [`scripts/kn5_writer.py`](scripts/kn5_writer.py): physics `1ROAD_0`, `1GRASS_0`, `1WALL_0`; visuals `ROAD_0`, `GRASS_0`; cones from the official EV map; satellite ground texture from Esri mosaic `tools/mis_z18.jpg`.
+- **Programmatic kn5 (v5)** via [`scripts/kn5_writer.py`](scripts/kn5_writer.py): physics `1ROAD_0`, `1GRASS_0`, `1WALL_0`; visuals `ROAD_0`, `GRASS_0`; **edge cones** (~4.5 m from centreline) from map linework + gap-fill along the lap; on-line cones only at gates/chicanes; `CONES_*` are **visual-only** (no physics prefix). Satellite ground from `tools/mis_z18.jpg`.
 - **Spots:** `AC_START_0`–`19`, `AC_PIT_0`–`19`, `AC_TIME_0` / `AC_TIME_1` beams near start-finish and mid-course (staging aligned to traced start-finish on the official map).
 - **`data/surfaces.ini`**, **`data/map.ini`**, **`data/ai/fast_lane.ai`** (centreline-based, optional AI support — verify in-game).
 - **Flat track:** no elevation mesh; Y-up AC coordinates; north from WGS84 ↔ AC affine fit (~2 mm at community-track spot anchors).

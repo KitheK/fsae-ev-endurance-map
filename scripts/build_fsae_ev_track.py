@@ -21,6 +21,7 @@ OUT = ROOT / "assetto_corsa" / "fsae_michigan_2026_ev"
 ARTIFACTS = ROOT / "artifacts"
 
 sys.path.insert(0, str(SCRIPTS))
+from cone_filter import filter_cones, road_edges_ac  # noqa: E402
 from kn5_writer import (  # noqa: E402
     Material,
     Mesh,
@@ -272,11 +273,10 @@ def main():
     lon, lat = np.array(cl["features"][0]["geometry"]["coordinates"]).T
     cx, cy, cz, en_xy, lap_m = sample_line_xyz(lon, lat, step=2.0)
 
-    cone_pkl = TOOLS / "ev_cones.pkl"
-    if not cone_pkl.exists():
-        raise SystemExit("Run cone extraction first (ev_cones.pkl missing)")
-    cones = pickle.loads(cone_pkl.read_bytes())
-    cone_pts = [(float(c[0]), float(c[1]), c[4]) for c in cones]
+    raw_pkl = TOOLS / "ev_cones_raw.pkl"
+    if not raw_pkl.exists():
+        raise SystemExit("Run scripts/extract_ev_cones.py first (ev_cones_raw.pkl missing)")
+    raw_markers = pickle.loads(raw_pkl.read_bytes())
 
     road_half = 5.0
     line_en = LineString(en_xy)
@@ -327,9 +327,38 @@ def main():
     road_vis = strip_mesh(cx, cz, road_half + 0.35, 1, "ROAD_0")
     road_phys = strip_mesh(cx, cz, road_half, 0, "1ROAD_0")
 
+  # Staging / pit lon-lat (for cone keep-out before meshes)
+    lon0, lat0 = lon[0], lat[0]
+    e0, n0 = ll2en(lon0, lat0)
+    de, dn = en_xy[1, 0] - e0, en_xy[1, 1] - n0
+    de, dn = de / (math.hypot(de, dn) + 1e-9), dn / (math.hypot(de, dn) + 1e-9)
+    lat_dir_e, lat_dir_n = -dn, de
+    spot_specs: list[tuple[str, float, float, float]] = []
+    spot_xy: list[tuple[float, float]] = []
+    h0 = heading_at(cx, cz, 0)
+    for i in range(20):
+        along = 8.0 + (i // 2) * 12.0
+        side = (i % 2) * 3.5
+        e = e0 - de * along + lat_dir_e * side
+        n = n0 - dn * along + lat_dir_n * side
+        lon_p = e / (111320 * math.cos(math.radians(LAT0))) + LON0
+        lat_p = n / 110574 + LAT0
+        spot_specs.append((f"AC_START_{i}", lon_p, lat_p, h0))
+        x, z = ll2ac(lon_p, lat_p)
+        spot_xy.append((float(x), float(z)))
+        e_pit = e + lat_dir_e * 4.0
+        n_pit = n + lat_dir_n * 4.0
+        lon_pit = e_pit / (111320 * math.cos(math.radians(LAT0))) + LON0
+        lat_pit = n_pit / 110574 + LAT0
+        spot_specs.append((f"AC_PIT_{i}", lon_pit, lat_pit, h0))
+        xp, zp = ll2ac(lon_pit, lat_pit)
+        spot_xy.append((float(xp), float(zp)))
+
+    cone_pts = filter_cones(raw_markers, en_xy, spot_xy=spot_xy, spot_clear_m=6.0)
+    left_edge, right_edge = road_edges_ac(cx, cz, road_half)
+
     cone_o, cone_b = [], []
-    step = max(1, len(cone_pts) // 450)
-    for lo, la, kind in cone_pts[::step]:
+    for lo, la, kind in cone_pts:
         x, z = ll2ac(lo, la)
         blk = cone_cylinder(float(x), float(z))
         (cone_b if kind == "ConeBlue" else cone_o).append(blk)
@@ -417,35 +446,12 @@ def main():
     if cone_b_mesh:
         children.append(Node("CONES_BLUE", cone_b_mesh))
 
-    h0 = heading_at(cx, cz, 0)
-    left_nx, left_nz = math.cos(h0), -math.sin(h0)
-
     def place_grid(name: str, lon_p, lat_p, heading):
         x, z = ll2ac(lon_p, lat_p)
         return transform_node(name, float(x), 0.0, float(z), heading)
 
-    # Start / pit grid beside staging straight (map start-finish near traced loop origin)
-    lon0, lat0 = lon[0], lat[0]
-    e0, n0 = ll2en(lon0, lat0)
-    de, dn = en_xy[1, 0] - e0, en_xy[1, 1] - n0
-    L = math.hypot(de, dn)
-    de, dn = de / L, dn / L
-  # lateral
-    lat_dir_e, lat_dir_n = -dn, de
-
-    for i in range(20):
-        along = 8.0 + (i // 2) * 12.0
-        side = (i % 2) * 3.5
-        e = e0 - de * along + lat_dir_e * side
-        n = n0 - dn * along + lat_dir_n * side
-        lon_p = e / (111320 * math.cos(math.radians(LAT0))) + LON0
-        lat_p = n / 110574 + LAT0
-        children.append(place_grid(f"AC_START_{i}", lon_p, lat_p, h0))
-        e_pit = e + lat_dir_e * 4.0
-        n_pit = n + lat_dir_n * 4.0
-        lon_pit = e_pit / (111320 * math.cos(math.radians(LAT0))) + LON0
-        lat_pit = n_pit / 110574 + LAT0
-        children.append(place_grid(f"AC_PIT_{i}", lon_pit, lat_pit, h0))
+    for name, lon_p, lat_p, hd in spot_specs:
+        children.append(place_grid(name, lon_p, lat_p, hd))
 
     # Start/finish timing beam
     te = e0 + lat_dir_e * 6.0
@@ -542,8 +548,8 @@ SCALE_FACTOR=1.0
         + "\n"
     )
 
-    render_validation(cx, cz, lon, lat, cone_pts, ix0, iy0, sat, lap_m)
-    make_previews(cx, cz, en_xy, cone_pts, lap_m, ix0, iy0, ix1, iy1, crop, lon, lat)
+    render_validation(cx, cz, lon, lat, cone_pts, ix0, iy0, sat, lap_m, road_half, left_edge, right_edge, spot_xy)
+    make_previews(cx, cz, en_xy, cone_pts, lap_m, ix0, iy0, ix1, iy1, crop, lon, lat, left_edge, right_edge)
 
     # Validate kn5
     sys.path.insert(0, str(TOOLS))
@@ -552,40 +558,126 @@ SCALE_FACTOR=1.0
     ver, tex, mats_r, meshes = kn5_reader.parse(str(kn5_path))
     print(f"KN5 OK v{ver}: {len(tex)} textures, {len(mats_r)} mats, {len(meshes)} meshes, lap={lap_m:.1f}m")
     meta = OUT / "build_meta.json"
-    meta.write_text(json.dumps({"lap_m": lap_m, "meshes": len(meshes), "cones": len(cone_pts)}, indent=2))
+    line = LineString(en_xy)
+    cone_d = [line.distance(Point(*ll2en(lo, la))) for lo, la, _ in cone_pts]
+    on_line = sum(1 for d in cone_d if d < 1.8)
+    edge = sum(1 for d in cone_d if 2.8 <= d <= 11.0)
+    near_start = sum(
+        1
+        for lo, la, _ in cone_pts
+        if min(math.hypot(ll2ac(lo, la)[0] - sx, ll2ac(lo, la)[1] - sz) for sx, sz in spot_xy) < 6.0
+    )
+    meta.write_text(
+        json.dumps(
+            {
+                "lap_m": lap_m,
+                "meshes": len(meshes),
+                "cones_orange": sum(1 for _lo, _la, k in cone_pts if k == "ConeOrange"),
+                "cones_blue": sum(1 for _lo, _la, k in cone_pts if k == "ConeBlue"),
+                "cone_on_line_m": on_line,
+                "cone_edge_m": edge,
+                "cones_within_spot_clear_m": near_start,
+                "spot_clear_m": 6.0,
+                "cone_mesh_visual_only": True,
+            },
+            indent=2,
+        )
+    )
 
 
-def render_validation(cx, cz, lon, lat, cone_pts, ix0, iy0, sat, lap_m):
-    """Top-down QA: road + cones on satellite and on official map."""
+def _ac_plot(
+    da: ImageDraw.ImageDraw,
+    x0,
+    z0,
+    x1,
+    z1,
+    cx,
+    cz,
+    left_edge,
+    right_edge,
+    cone_pts,
+    spot_xy=None,
+    plot_w: float = 820,
+    plot_h: float = 620,
+    mx: float = 40,
+    my: float = 660,
+):
+    def tp(x, z):
+        return (
+            int(mx + (x - x0) / (x1 - x0) * plot_w),
+            int(my - (z - z0) / (z1 - z0) * plot_h),
+        )
+
+    le = [tp(x, z) for x, z in left_edge]
+    ri = [tp(x, z) for x, z in right_edge]
+    ctr = [tp(x, z) for x, z in zip(cx, cz)]
+    if len(le) > 2:
+        da.line(le + [le[0]], fill=(100, 220, 255), width=2)
+        da.line(ri + [ri[0]], fill=(100, 255, 180), width=2)
+    da.line(ctr + [ctr[0]], fill=(255, 70, 60), width=2)
+    for lo, la, kind in cone_pts:
+        x, z = ll2ac(lo, la)
+        px, py = tp(x, z)
+        col = (240, 150, 40) if kind == "ConeOrange" else (50, 110, 230)
+        da.ellipse([px - 3, py - 3, px + 3, py + 3], fill=col, outline=(30, 30, 30))
+    if spot_xy:
+        for sx, sz in spot_xy[:4]:
+            px, py = tp(sx, sz)
+            da.rectangle([px - 5, py - 5, px + 5, py + 5], outline=(255, 255, 255), width=2)
+
+
+def render_validation(
+    cx, cz, lon, lat, cone_pts, ix0, iy0, sat, lap_m, road_half, left_edge, right_edge, spot_xy
+):
+    """Top-down QA: road edges, centreline, cones; includes zoom inset."""
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     pad = 8
     sat_draw = Image.fromarray(sat).copy()
     d = ImageDraw.Draw(sat_draw, "RGBA")
+
+    def draw_en_edges(line_pts, col):
+        for i in range(len(line_pts) - 1):
+            p1 = en2z18px(line_pts[i][0], line_pts[i][1])
+            p2 = en2z18px(line_pts[i + 1][0], line_pts[i + 1][1])
+            d.line([p1, p2], fill=col, width=2)
+
+    line_en = np.array([ll2en(lo, la) for lo, la in zip(lon, lat)])
+    le_en, ri_en = [], []
+    for i in range(len(lon)):
+        if i == 0:
+            de, dn = line_en[1] - line_en[0]
+        elif i == len(lon) - 1:
+            de, dn = line_en[-1] - line_en[-2]
+        else:
+            de, dn = line_en[i + 1] - line_en[i - 1]
+        L = math.hypot(de, dn) + 1e-9
+        nx, ny = -dn / L, de / L
+        le_en.append((line_en[i, 0] + road_half * nx, line_en[i, 1] + road_half * ny))
+        ri_en.append((line_en[i, 0] - road_half * nx, line_en[i, 1] - road_half * ny))
+
+    draw_en_edges(le_en, (100, 220, 255, 200))
+    draw_en_edges(ri_en, (100, 255, 160, 200))
     for i in range(len(lon) - 1):
-        px0, py0 = en2z18px(*ll2en(lon[i], lat[i]))
-        px1, py1 = en2z18px(*ll2en(lon[i + 1], lat[i + 1]))
-        d.line([(px0, py0), (px1, py1)], fill=(255, 60, 60, 230), width=3)
-    for lo, la, kind in cone_pts[:: max(1, len(cone_pts) // 500)]:
+        d.line(
+            [en2z18px(*ll2en(lon[i], lat[i])), en2z18px(*ll2en(lon[i + 1], lat[i + 1]))],
+            fill=(255, 60, 60, 240),
+            width=2,
+        )
+    for lo, la, kind in cone_pts:
         px, py = en2z18px(*ll2en(lo, la))
-        col = (255, 160, 40, 220) if kind == "ConeOrange" else (60, 130, 255, 220)
-        d.ellipse([px - 2, py - 2, px + 2, py + 2], fill=col)
-    x0, z0, x1, z1 = cx.min() - pad, cz.min() - pad, cx.max() + pad, cz.max() + pad
+        col = (255, 160, 40, 230) if kind == "ConeOrange" else (60, 130, 255, 230)
+        d.ellipse([px - 3, py - 3, px + 3, py + 3], fill=col)
+
+    x0, z0, x1, z1 = float(cx.min() - pad), float(cz.min() - pad), float(cx.max() + pad), float(cz.max() + pad)
     ac_draw = Image.new("RGB", (900, 700), (25, 28, 22))
     da = ImageDraw.Draw(ac_draw)
-    pts = [
-        (
-            int(40 + (x - x0) / (x1 - x0) * 820),
-            int(660 - (z - z0) / (z1 - z0) * 620),
-        )
-        for x, z in zip(cx, cz)
-    ]
-    da.line(pts + [pts[0]], fill=(255, 70, 60), width=3)
-    for lo, la, kind in cone_pts[:: max(1, len(cone_pts) // 400)]:
-        x, z = ll2ac(lo, la)
-        px, py = int(40 + (x - x0) / (x1 - x0) * 820), int(660 - (z - z0) / (z1 - z0) * 620)
-        col = (240, 150, 40) if kind == "ConeOrange" else (50, 110, 230)
-        da.ellipse([px - 2, py - 2, px + 2, py + 2], fill=col)
-    da.text((12, 8), f"AC world overlay ~{lap_m:.0f} m lap", fill=(230, 230, 230))
+    _ac_plot(da, x0, z0, x1, z1, cx, cz, left_edge, right_edge, cone_pts)
+    da.text(
+        (12, 8),
+        f"AC: cyan/green = road edges ({road_half:.0f} m half-width), red = centreline, orange/blue = cones",
+        fill=(230, 230, 230),
+    )
+    da.text((12, 28), f"Lap ~{lap_m:.0f} m | cones placed: {len(cone_pts)}", fill=(200, 200, 200))
     # crop satellite panel around track
     px_c, py_c = en2z18px(*ll2en(lon.mean(), lat.mean()))
     cw, ch = 700, 520
@@ -597,9 +689,21 @@ def render_validation(cx, cz, lon, lat, cone_pts, ix0, iy0, sat, lap_m):
             min(sat_draw.height, int(py_c + ch // 2)),
         )
     )
-    combo = Image.new("RGB", (1620, 720))
+    # Zoom on back-straight chicane (~35% lap)
+    zi = max(1, int(len(cx) * 0.35))
+    zr = 45
+    x0z, x1z = float(cx[zi] - zr), float(cx[zi] + zr)
+    z0z, z1z = float(cz[zi] - zr), float(cz[zi] + zr)
+    zoom = Image.new("RGB", (420, 320), (20, 22, 18))
+    dz = ImageDraw.Draw(zoom)
+    _ac_plot(dz, x0z, z0z, x1z, z1z, cx, cz, left_edge, right_edge, cone_pts, plot_w=400, plot_h=285, mx=10, my=305)
+    dz.text((8, 6), "ZOOM: edges / centreline / cones", fill=(240, 240, 220))
+    dz.text((8, 22), "(chicane sector)", fill=(180, 180, 180))
+
+    combo = Image.new("RGB", (1620, 900))
     combo.paste(crop2.resize((900, 700)), (0, 10))
     combo.paste(ac_draw, (710, 10))
+    combo.paste(zoom, (710, 560))
     combo.save(ARTIFACTS / "check_satellite_and_ac_world.png")
     off = Image.open(ROOT / "official_ev_endurance_2026.png").convert("RGBA")
     ow, oh = off.size
@@ -638,9 +742,28 @@ def render_validation(cx, cz, lon, lat, cone_pts, ix0, iy0, sat, lap_m):
     pts_uv = [ll_to_uv(lo, la) for lo, la in zip(lon[::2], lat[::2])]
     if len(pts_uv) > 2:
         do.line(pts_uv + [pts_uv[0]], fill=(255, 40, 40), width=3)
-    do.text((10, 10), "Generated centreline on official EV map (4 px search)", fill=(80, 20, 20))
+    for lo, la, kind in cone_pts:
+        sx, sy = ll_to_uv(lo, la)
+        col = (220, 120, 20) if kind == "ConeOrange" else (30, 80, 200)
+        do.ellipse([sx - 2, sy - 2, sx + 2, sy + 2], fill=col)
+    do.text((10, 10), "Red = centreline; cones = filtered edge/slalom only (not map racing line)", fill=(80, 20, 20))
     ov.save(ARTIFACTS / "check_road_on_official_map.png")
-    combo.save(ARTIFACTS / "check_track_validation.png")
+    leg = Image.new("RGB", (1620, 140), (18, 18, 18))
+    dl = ImageDraw.Draw(leg)
+    dl.text(
+        (12, 12),
+        "Cone QA: orange should sit between cyan/green edges and NOT on red centreline except chicane/gate clusters.",
+        fill=(230, 230, 230),
+    )
+    dl.text(
+        (12, 38),
+        "CONES_* meshes have no 1ROAD_/1CONE_ physics prefix (visual only). Spots cleared ±4.5 m in filter.",
+        fill=(190, 190, 190),
+    )
+    stacked = Image.new("RGB", (1620, 1040))
+    stacked.paste(combo, (0, 0))
+    stacked.paste(leg, (0, 900))
+    stacked.save(ARTIFACTS / "check_track_validation.png")
 
 
 def gpx2ll(x, y, z):
@@ -650,7 +773,7 @@ def gpx2ll(x, y, z):
     return float(lon), float(lat)
 
 
-def make_previews(cx, cz, en_xy, cones, lap_m, ix0, iy0, ix1, iy1, crop, lon, lat):
+def make_previews(cx, cz, en_xy, cones, lap_m, ix0, iy0, ix1, iy1, crop, lon, lat, left_edge, right_edge):
     ui = OUT / "ui"
     W, H = 512, 512
     pad = 40
@@ -665,9 +788,14 @@ def make_previews(cx, cz, en_xy, cones, lap_m, ix0, iy0, ix1, iy1, crop, lon, la
     for name in ("preview.png", "outline.png"):
         im = Image.new("RGB", (W, H), (30, 35, 28))
         d = ImageDraw.Draw(im)
+        le = [to_px(x, z) for x, z in left_edge]
+        ri = [to_px(x, z) for x, z in right_edge]
         pts = [to_px(x, z) for x, z in zip(cx, cz)]
+        if len(le) > 2:
+            d.line(le, fill=(80, 200, 240), width=1)
+            d.line(ri, fill=(80, 240, 160), width=1)
         if len(pts) > 2:
-            d.line(pts + [pts[0]], fill=(240, 70, 60), width=3)
+            d.line(pts + [pts[0]], fill=(240, 70, 60), width=2)
         for lo, la, kind in cones[:: max(1, len(cones) // 400)]:
             x, z = ll2ac(lo, la)
             px, py = to_px(x, z)
