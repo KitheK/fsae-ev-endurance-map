@@ -1,4 +1,4 @@
-"""Write Assetto Corsa .kn5 v5 meshes (validated via tools/kn5.py reader)."""
+"""Write Assetto Corsa .kn5 v5 (AcTools.Kn5File compatible)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,15 @@ import numpy as np
 
 KN5_MAX_VERTICES = 65535
 
+_DEFAULT_PBR = [
+    ("ksAmbient", 0.2),
+    ("ksDiffuse", 0.75),
+    ("ksSpecular", 0.15),
+    ("ksSpecularEXP", 12.0),
+    ("ksEmissive", 0.0),
+    ("ksAlphaRef", 0.0),
+]
+
 
 @dataclass
 class Texture:
@@ -20,10 +29,23 @@ class Texture:
 @dataclass
 class Material:
     name: str
-    shader: str
-    properties: list[tuple[str, float]]
-    textures: list[tuple[str, int, str]]
+    shader: str = "ksPerPixelMultiMap"
+    properties: list[tuple[str, float]] | None = None
+    textures: list[tuple[str, int, str]] | None = None
     alpha_tested: bool = False
+    blend_mode: int = 0
+    depth_mode: int = 0
+
+    def __post_init__(self):
+        if self.properties is None:
+            self.properties = list(_DEFAULT_PBR)
+        else:
+            names = {p[0] for p in self.properties}
+            for k, v in _DEFAULT_PBR:
+                if k not in names:
+                    self.properties.append((k, v))
+        if self.textures is None:
+            self.textures = []
 
 
 @dataclass
@@ -35,6 +57,8 @@ class Mesh:
     material: int
     cast_shadows: bool = True
     renderable: bool = True
+    is_visible: bool = True
+    is_transparent: bool = False
 
 
 @dataclass
@@ -43,38 +67,59 @@ class Node:
     mesh: Mesh | None = None
     transform: np.ndarray | None = None
     children: list[Node] = field(default_factory=list)
+    active: bool = True
 
 
 def _str(buf: io.BytesIO, s: str) -> None:
-    b = s.encode("utf-8")
+    b = s.encode("latin1", errors="replace")
     buf.write(struct.pack("<i", len(b)))
     buf.write(b)
+
+
+def _write_shader_prop(buf: io.BytesIO, name: str, value: float) -> None:
+    _str(buf, name)
+    buf.write(struct.pack("<f", value))
+    buf.write(struct.pack("<2f", 0.0, 0.0))
+    buf.write(struct.pack("<3f", 0.0, 0.0, 0.0))
+    buf.write(struct.pack("<4f", 0.0, 0.0, 0.0, 0.0))
 
 
 def _write_node(buf: io.BytesIO, n: Node) -> None:
     buf.write(struct.pack("<i", 2 if n.mesh is not None else 1))
     _str(buf, n.name)
-    buf.write(struct.pack("<iB", len(n.children), 1))
+    buf.write(struct.pack("<i", len(n.children)))
+    buf.write(struct.pack("<B", 1 if n.active else 0))
     M = n.transform if n.transform is not None else np.eye(4, dtype=np.float32)
     if n.mesh is None:
         buf.write(M.astype("<f4").tobytes())
     else:
         m = n.mesh
-        if len(m.positions) > KN5_MAX_VERTICES:
-            raise ValueError(f"{n.name}: {len(m.positions)} vertices (max {KN5_MAX_VERTICES})")
-        buf.write(struct.pack("<BBB", int(m.cast_shadows), 1, 0))
-        tangents = np.tile(np.array([1, 0, 0], np.float32), (len(m.positions), 1))
+        n_verts = len(m.positions)
+        if n_verts > KN5_MAX_VERTICES:
+            raise ValueError(f"{n.name}: {n_verts} vertices (max {KN5_MAX_VERTICES})")
+        buf.write(
+            struct.pack(
+                "<BBB",
+                1 if m.cast_shadows else 0,
+                1 if m.is_visible else 0,
+                1 if m.is_transparent else 0,
+            )
+        )
+        tangents = np.zeros((n_verts, 3), np.float32)
+        tangents[:, 0] = 1.0
+        # AcTools/Kn5 vertex order: Position, Normal, Tex, Tangent
         verts = np.hstack([m.positions, m.normals, m.uvs, tangents]).astype("<f4")
-        buf.write(struct.pack("<i", len(m.positions)))
+        buf.write(struct.pack("<I", n_verts))
         buf.write(verts.tobytes())
-        idx = np.asarray(m.indices, dtype="<u2")
-        buf.write(struct.pack("<i", len(idx)))
+        idx = np.asarray(m.indices, dtype=np.uint16)
+        buf.write(struct.pack("<I", len(idx)))
         buf.write(idx.tobytes())
         center = (m.positions.max(0) + m.positions.min(0)) / 2
-        radius = float(np.linalg.norm(m.positions - center, axis=1).max())
-        buf.write(struct.pack("<iiff", m.material, 0, 0.0, 0.0))
+        radius = float(np.linalg.norm(m.positions - center, axis=1).max()) + 0.05
+        buf.write(struct.pack("<II", int(m.material), 0))
+        buf.write(struct.pack("<ff", 0.0, 0.0))
         buf.write(struct.pack("<3ff", float(center[0]), float(center[1]), float(center[2]), radius))
-        buf.write(struct.pack("<B", int(m.renderable)))
+        buf.write(struct.pack("<B", 1 if m.renderable else 0))
     for c in n.children:
         _write_node(buf, c)
 
@@ -95,11 +140,11 @@ def write_kn5(textures: list[Texture], materials: list[Material], root: Node, ve
     for mat in materials:
         _str(buf, mat.name)
         _str(buf, mat.shader)
-        buf.write(struct.pack("<BBi", 0, int(mat.alpha_tested), 0))
+        buf.write(struct.pack("<BB", mat.blend_mode, 1 if mat.alpha_tested else 0))
+        buf.write(struct.pack("<i", mat.depth_mode))
         buf.write(struct.pack("<i", len(mat.properties)))
-        for name, value in mat.properties:
-            _str(buf, name)
-            buf.write(struct.pack("<" + "f" * 10, value, *([0.0] * 9)))
+        for pname, pval in mat.properties:
+            _write_shader_prop(buf, pname, pval)
         buf.write(struct.pack("<i", len(mat.textures)))
         for sampler, slot, tex in mat.textures:
             _str(buf, sampler)
@@ -110,21 +155,21 @@ def write_kn5(textures: list[Texture], materials: list[Material], root: Node, ve
 
 
 def transform_node(name: str, x: float, y: float, z: float, heading_rad: float) -> Node:
-    """AC spot / empty node: Y-up, heading rotates around +Y (radians)."""
+    """Y-up AC spawn node (row-major 4x4, translation in row 3)."""
     c, s = float(np.cos(heading_rad)), float(np.sin(heading_rad))
     M = np.array(
         [
-            [c, 0, s, 0],
-            [0, 1, 0, 0],
-            [-s, 0, c, 0],
-            [x, y, z, 1],
+            [c, 0.0, s, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [-s, 0.0, c, 0.0],
+            [x, y, z, 1.0],
         ],
         dtype=np.float32,
     )
-    return Node(name, transform=M)
+    return Node(name, transform=M, active=True)
 
 
-# --- DDS BC1 (DXT1) for ground orthophoto ---
+# --- DDS BC1 (DXT1) ---
 
 
 def _mips(img: np.ndarray, min_size: int = 1) -> list[np.ndarray]:
@@ -196,7 +241,3 @@ def dds_bc1(rgb: np.ndarray) -> bytes:
     body = b"".join(_bc1(l) for l in levels)
     w, h = rgb.shape[1], rgb.shape[0]
     return _header(w, h, len(levels), b"DXT1", max(1, (w + 3) // 4) * max(1, (h + 3) // 4) * 8) + body
-
-
-def png_bytes(path: str) -> bytes:
-    return open(path, "rb").read()

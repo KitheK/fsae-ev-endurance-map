@@ -2,6 +2,7 @@ import struct, sys, numpy as np
 class R:
     def __init__(s,b): s.b=b; s.p=0
     def i(s): v=struct.unpack_from('<i',s.b,s.p)[0]; s.p+=4; return v
+    def u(s): v=struct.unpack_from('<I',s.b,s.p)[0]; s.p+=4; return v
     def u8(s): v=s.b[s.p]; s.p+=1; return v
     def f(s,n=1):
         v=struct.unpack_from('<%df'%n,s.b,s.p); s.p+=4*n; return v if n>1 else v[0]
@@ -34,9 +35,9 @@ def parse(path):
             M=m@M
         elif t==2:
             r.u8();r.u8();r.u8()
-            vc=r.i(); v=np.frombuffer(b,dtype='<f4',count=vc*11,offset=r.p).reshape(vc,11); r.p+=vc*44
-            ic=r.i(); idx=np.frombuffer(b,dtype='<u2',count=ic,offset=r.p); r.p+=ic*2
-            mid=r.i(); r.i(); r.f(2); r.f(4); r.u8()
+            vc=r.u(); v=np.frombuffer(b,dtype='<f4',count=vc*11,offset=r.p).reshape(vc,11); r.p+=vc*44
+            ic=r.u(); idx=np.frombuffer(b,dtype='<u2',count=ic,offset=r.p); r.p+=ic*2
+            mid=r.u(); r.u(); r.f(2); r.f(4); r.u8()
             pos=np.c_[v[:,:3],np.ones(vc)]@M
             meshes.append(dict(name=name,path=path,pos=pos[:,:3],uv=v[:,6:8].copy(),idx=idx.copy(),mat=mid))
         elif t==3:

@@ -153,6 +153,22 @@ def triangulate_polygon(poly: Polygon, y: float, uvs: np.ndarray | None = None) 
     )
 
 
+def cone_physics_box(x: float, z: float, half: float = 0.17, height: float = 0.72) -> tuple:
+    y0, y1 = 0.0, height
+    corners = [
+        [x - half, y0, z - half],
+        [x + half, y0, z - half],
+        [x + half, y0, z + half],
+        [x - half, y0, z + half],
+        [x - half, y1, z - half],
+        [x + half, y1, z - half],
+        [x + half, y1, z + half],
+        [x - half, y1, z + half],
+    ]
+    idx = [0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7, 4, 5, 6, 4, 6, 7]
+    return corners, [[0, 1, 0]] * 8, [[0, 0]] * 8, idx
+
+
 def cone_cylinder(x, z, radius=0.15, height=0.7, mat=0, segments=8):
     verts, nrms, uvs, idx = [], [], [], []
     base = len(verts)
@@ -327,11 +343,14 @@ def main():
     ext = np.array(pad_poly.exterior.coords[:-1])
     uvs = np.array([ac_to_uv(p[0], p[1]) for p in ext], np.float32)
 
-    grass_vis = triangulate_polygon(pad_poly, y=-0.15, uvs=uvs)
-    grass_phys = triangulate_polygon(pad_poly, y=-0.05, uvs=uvs)
+    grass_vis = triangulate_polygon(pad_poly, y=-0.01, uvs=uvs)
+    grass_phys = triangulate_polygon(pad_poly, y=0.0, uvs=uvs)
 
+    # Road physics/visual at y=0.02 so tyres sit on top of grass plane (avoids z-fight & holes).
     road_vis = strip_mesh(cx, cz, road_half + 0.35, 1, "ROAD_0")
     road_phys = strip_mesh(cx, cz, road_half, 0, "1ROAD_0")
+    road_vis.mesh.positions[:, 1] = 0.02
+    road_phys.mesh.positions[:, 1] = 0.02
 
   # Staging / pit lon-lat (for cone keep-out before meshes)
     lon0, lat0 = lon[0], lat[0]
@@ -363,13 +382,17 @@ def main():
     cone_pts = filter_cones(raw_markers, en_xy, spot_xy=spot_xy, spot_clear_m=6.0)
     left_edge, right_edge = road_edges_ac(cx, cz, road_half)
 
-    cone_o, cone_b = [], []
+    cone_o_vis, cone_b_vis, cone_phys = [], [], []
     for lo, la, kind in cone_pts:
         x, z = ll2ac(lo, la)
-        blk = cone_cylinder(float(x), float(z))
-        (cone_b if kind == "ConeBlue" else cone_o).append(blk)
-    cone_o_mesh = merge_meshes(cone_o, 3) if cone_o else None
-    cone_b_mesh = merge_meshes(cone_b, 4) if cone_b else None
+        xf, zf = float(x), float(z)
+        vis = cone_cylinder(xf, zf, height=0.7)
+        phys = cone_physics_box(xf, zf)
+        (cone_b_vis if kind == "ConeBlue" else cone_o_vis).append(vis)
+        cone_phys.append(phys)
+    cone_o_mesh = merge_meshes(cone_o_vis, 3) if cone_o_vis else None
+    cone_b_mesh = merge_meshes(cone_b_vis, 4) if cone_b_vis else None
+    cone_phys_mesh = merge_meshes(cone_phys, 5) if cone_phys else None
 
     margin = 55
     wx0, wz0 = float(cx.min() - margin), float(cz.min() - margin)
@@ -379,42 +402,12 @@ def main():
     wall_mesh = merge_meshes(wall_parts, 5)
 
     mats = [
-        Material(
-            "Tarmac",
-            "ksPerPixelMultiMap",
-            [("ksAmbient", 0.05), ("ksDiffuse", 0.65), ("ksSpecular", 0.1), ("ksSpecularEXP", 10.0)],
-            [("txDiffuse", 0, "road.dds")],
-        ),
-        Material(
-            "TarmacVis",
-            "ksPerPixelMultiMap",
-            [("ksAmbient", 0.08), ("ksDiffuse", 0.75), ("ksSpecular", 0.15), ("ksSpecularEXP", 12.0)],
-            [("txDiffuse", 0, "road.dds")],
-        ),
-        Material(
-            "GrassGround",
-            "ksPerPixelMultiMap",
-            [("ksAmbient", 0.1), ("ksDiffuse", 0.8), ("ksSpecular", 0.02), ("ksSpecularEXP", 5.0)],
-            [("txDiffuse", 0, dds_name)],
-        ),
-        Material(
-            "ConeOrange",
-            "ksPerPixelMultiMap",
-            [("ksAmbient", 0.1), ("ksDiffuse", 0.85), ("ksSpecular", 0.05), ("ksSpecularEXP", 8.0)],
-            [("txDiffuse", 0, "cone_orange.dds")],
-        ),
-        Material(
-            "ConeBlue",
-            "ksPerPixelMultiMap",
-            [("ksAmbient", 0.1), ("ksDiffuse", 0.85), ("ksSpecular", 0.05), ("ksSpecularEXP", 8.0)],
-            [("txDiffuse", 0, "cone_blue.dds")],
-        ),
-        Material(
-            "Wall",
-            "ksPerPixelMultiMap",
-            [("ksAmbient", 0.05), ("ksDiffuse", 0.55), ("ksSpecular", 0.05), ("ksSpecularEXP", 6.0)],
-            [("txDiffuse", 0, "wall.dds")],
-        ),
+        Material("Tarmac", textures=[("txDiffuse", 0, "road.dds")]),
+        Material("TarmacVis", textures=[("txDiffuse", 0, "road.dds")]),
+        Material("GrassGround", textures=[("txDiffuse", 0, dds_name)]),
+        Material("ConeOrange", textures=[("txDiffuse", 0, "cone_orange.dds")]),
+        Material("ConeBlue", textures=[("txDiffuse", 0, "cone_blue.dds")]),
+        Material("Wall", textures=[("txDiffuse", 0, "wall.dds")]),
     ]
 
     def solid_dds(rgb):
@@ -447,14 +440,21 @@ def main():
         road_vis,
         Node("1WALL_0", wall_mesh),
     ]
+    if cone_phys_mesh:
+        cone_phys_mesh.cast_shadows = False
+        cone_phys_mesh.renderable = False
+        children.append(Node("1WALL_1", cone_phys_mesh))
     if cone_o_mesh:
+        cone_o_mesh.cast_shadows = True
         children.append(Node("CONES_ORANGE", cone_o_mesh))
     if cone_b_mesh:
         children.append(Node("CONES_BLUE", cone_b_mesh))
 
+    SPAWN_Y = 0.12
+
     def place_grid(name: str, lon_p, lat_p, heading):
         x, z = ll2ac(lon_p, lat_p)
-        return transform_node(name, float(x), 0.0, float(z), heading)
+        return transform_node(name, float(x), SPAWN_Y, float(z), heading)
 
     for name, lon_p, lat_p, hd in spot_specs:
         children.append(place_grid(name, lon_p, lat_p, hd))
@@ -468,16 +468,16 @@ def main():
         lon_p = e / (111320 * math.cos(math.radians(LAT0))) + LON0
         lat_p = n / 110574 + LAT0
         xp, zp = ll2ac(lon_p, lat_p)
-        children.append(transform_node(tag, float(xp), 0.0, float(zp), h0 + math.pi / 2))
+        children.append(transform_node(tag, float(xp), SPAWN_Y, float(zp), h0 + math.pi / 2))
 
     # Second beam on back straight (~mid lap)
     mid_i = len(lon) // 2
     h1 = heading_at(cx, cz, mid_i)
     children.append(
-        transform_node("AC_TIME_1_L", float(cx[mid_i] - 6 * math.sin(h1)), 0.0, float(cz[mid_i] - 6 * math.cos(h1)), h1 + math.pi / 2)
+        transform_node("AC_TIME_1_L", float(cx[mid_i] - 6 * math.sin(h1)), SPAWN_Y, float(cz[mid_i] - 6 * math.cos(h1)), h1 + math.pi / 2)
     )
     children.append(
-        transform_node("AC_TIME_1_R", float(cx[mid_i] + 6 * math.sin(h1)), 0.0, float(cz[mid_i] + 6 * math.cos(h1)), h1 + math.pi / 2)
+        transform_node("AC_TIME_1_R", float(cx[mid_i] + 6 * math.sin(h1)), SPAWN_Y, float(cz[mid_i] + 6 * math.cos(h1)), h1 + math.pi / 2)
     )
 
     root = Node("Scene", children=children)
@@ -490,16 +490,6 @@ def main():
     data.mkdir(exist_ok=True)
     (data / "surfaces.ini").write_text(
         """[SURFACE_0]
-KEY=ROAD
-FRICTION=1.0
-DAMPING=0
-WAV=0
-WAV_LEN=0
-FF_EFFECT=0
-BLACK_FLAG_TIME=0
-IS_VALID_TRACK=1
-
-[SURFACE_1]
 KEY=GRASS
 FRICTION=0.7
 DAMPING=0.05
@@ -509,7 +499,7 @@ FF_EFFECT=0
 BLACK_FLAG_TIME=0
 IS_VALID_TRACK=0
 
-[SURFACE_2]
+[SURFACE_1]
 KEY=WALL
 FRICTION=0.1
 DAMPING=0
@@ -518,6 +508,23 @@ WAV_LEN=0
 FF_EFFECT=0
 BLACK_FLAG_TIME=0
 IS_VALID_TRACK=0
+
+[SURFACE_2]
+KEY=ROAD
+FRICTION=1.0
+DAMPING=0
+WAV=0
+WAV_LEN=0
+FF_EFFECT=0
+BLACK_FLAG_TIME=0
+IS_VALID_TRACK=1
+"""
+    )
+    (OUT / "models.ini").write_text(
+        """[MODEL_0]
+FILE=fsae_michigan_2026_ev.kn5
+POSITION=0,0,0
+ROTATION=0,0,0
 """
     )
     (data / "map.ini").write_text(
@@ -584,7 +591,8 @@ SCALE_FACTOR=1.0
                 "cone_edge_m": edge,
                 "cones_within_spot_clear_m": near_start,
                 "spot_clear_m": 6.0,
-                "cone_mesh_visual_only": True,
+                "cone_physics_mesh": "1WALL_1",
+                "spawn_y_m": SPAWN_Y,
             },
             indent=2,
         )

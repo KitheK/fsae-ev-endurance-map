@@ -27,13 +27,14 @@ Requirements: Python 3.10+, `numpy`, `Pillow`, `shapely`.
 pip install numpy pillow shapely
 python3 scripts/extract_ev_cones.py      # dark linework on official map (excludes red racing line)
 python3 scripts/build_fsae_ev_track.py   # writes assetto_corsa/fsae_michigan_2026_ev/
+python3 scripts/validate_kn5_ac.py       # AcTools-aligned kn5 byte audit
 ```
 
-Validation images are written to [`artifacts/`](artifacts/) (`check_satellite_and_ac_world.png`, `check_road_on_official_map.png`). The generated `.kn5` is re-read with [`tools/kn5.py`](tools/kn5.py).
+Validation images are written to [`artifacts/`](artifacts/). Automated in-game compatibility notes: [`artifacts/INGAME_VALIDATION.md`](artifacts/INGAME_VALIDATION.md). The generated `.kn5` is re-read with [`tools/kn5.py`](tools/kn5.py).
 
 ### Track contents & limitations
 
-- **Programmatic kn5 (v5)** via [`scripts/kn5_writer.py`](scripts/kn5_writer.py): physics `1ROAD_0`, `1GRASS_0`, `1WALL_0`; visuals `ROAD_0`, `GRASS_0`; **edge cones** (~4.5 m from centreline) from map linework + gap-fill along the lap; on-line cones only at gates/chicanes; `CONES_*` are **visual-only** (no physics prefix). Satellite ground from `tools/mis_z18.jpg`.
+- **Programmatic kn5 (v5)** via [`scripts/kn5_writer.py`](scripts/kn5_writer.py) (AcTools-aligned): physics `1GRASS_0` @ Y=0, `1ROAD_0` @ 0.02 m, `1WALL_0`, cone colliders **`1WALL_1`** (invisible); visuals `ROAD_0`, `GRASS_0`, `CONES_*`. Spawns **Y=0.12 m**. `models.ini`; `surfaces.ini` has **ROAD last** for physics priority. See [`artifacts/INGAME_VALIDATION.md`](artifacts/INGAME_VALIDATION.md).
 - **Spots:** `AC_START_0`–`19`, `AC_PIT_0`–`19`, `AC_TIME_0` / `AC_TIME_1` beams near start-finish and mid-course (staging aligned to traced start-finish on the official map).
 - **`data/surfaces.ini`**, **`data/map.ini`**, **`ai/fast_lane.ai`** at track root (centreline-based, optional AI support — verify in-game).
 - **Flat track:** no elevation mesh; Y-up AC coordinates; north from WGS84 ↔ AC affine fit (~2 mm at community-track spot anchors).
