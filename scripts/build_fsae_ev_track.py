@@ -268,6 +268,13 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     tex_dir = OUT / "texture"
     tex_dir.mkdir(exist_ok=True)
+    # Remove deprecated layout from earlier builds
+    stale_ai = OUT / "data" / "ai"
+    if stale_ai.is_dir():
+        for f in stale_ai.iterdir():
+            f.unlink(missing_ok=True)
+        stale_ai.rmdir()
+    (tex_dir / "ground_sat_src.png").unlink(missing_ok=True)
 
     cl = json.loads((ROOT / "official_line.geojson").read_text())
     lon, lat = np.array(cl["features"][0]["geometry"]["coordinates"]).T
@@ -297,7 +304,6 @@ def main():
     ground_tex = np.array(Image.fromarray(crop).resize((cw, ch), Image.LANCZOS))
     dds_name = "ground_sat.dds"
     (tex_dir / dds_name).write_bytes(dds_bc1(ground_tex))
-    Image.fromarray(crop).save(tex_dir / "ground_sat_src.png")
 
     ax0, az0 = en2ac(bx0, by0)
     ax1, az1 = en2ac(bx1, by1)
@@ -524,7 +530,7 @@ Z_OFFSET={float(np.mean(cz)):.2f}
 SCALE_FACTOR=1.0
 """
     )
-    write_fast_lane(data / "ai" / "fast_lane.ai", cx, cy, cz)
+    write_fast_lane(OUT / "ai" / "fast_lane.ai", cx, cy, cz)
 
     ui = OUT / "ui"
     ui.mkdir(exist_ok=True)

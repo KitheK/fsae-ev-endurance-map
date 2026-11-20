@@ -35,7 +35,7 @@ Validation images are written to [`artifacts/`](artifacts/) (`check_satellite_an
 
 - **Programmatic kn5 (v5)** via [`scripts/kn5_writer.py`](scripts/kn5_writer.py): physics `1ROAD_0`, `1GRASS_0`, `1WALL_0`; visuals `ROAD_0`, `GRASS_0`; **edge cones** (~4.5 m from centreline) from map linework + gap-fill along the lap; on-line cones only at gates/chicanes; `CONES_*` are **visual-only** (no physics prefix). Satellite ground from `tools/mis_z18.jpg`.
 - **Spots:** `AC_START_0`–`19`, `AC_PIT_0`–`19`, `AC_TIME_0` / `AC_TIME_1` beams near start-finish and mid-course (staging aligned to traced start-finish on the official map).
-- **`data/surfaces.ini`**, **`data/map.ini`**, **`data/ai/fast_lane.ai`** (centreline-based, optional AI support — verify in-game).
+- **`data/surfaces.ini`**, **`data/map.ini`**, **`ai/fast_lane.ai`** at track root (centreline-based, optional AI support — verify in-game).
 - **Flat track:** no elevation mesh; Y-up AC coordinates; north from WGS84 ↔ AC affine fit (~2 mm at community-track spot anchors).
 - **Not verified in-game here:** physics grip, AI line quality, pit/timing gate exact placement vs rules, CSP grass shader. Please report issues after a test drive.
 
