@@ -1,0 +1,12 @@
+{
+  "lap_m": 1218.0778870401825,
+  "meshes": 8,
+  "cones_orange": 385,
+  "cones_blue": 2,
+  "cone_on_line_m": 2,
+  "cone_edge_m": 367,
+  "cones_within_spot_clear_m": 0,
+  "spot_clear_m": 6.0,
+  "cone_physics_mesh": "1WALL_1",
+  "spawn_y_m": 0.12
+}

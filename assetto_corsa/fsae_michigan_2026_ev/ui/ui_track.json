@@ -1,0 +1,20 @@
+{
+  "name": "FSAE Michigan 2026 EV Endurance",
+  "description": "FSAE Electric 2026 EV Endurance layout at Michigan International Speedway (infield / back-straight paddock). Flat ~1.22 km lap from official fsaeonline map.",
+  "tags": [
+    "circuit",
+    "USA",
+    "original",
+    "fsae"
+  ],
+  "geotags": [
+    "42.068",
+    "-84.237"
+  ],
+  "country": "USA",
+  "city": "Brooklyn, MI",
+  "length": "1218",
+  "width": "12",
+  "pitboxes": 20,
+  "year": 2026
+}

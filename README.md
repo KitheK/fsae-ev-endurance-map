@@ -1,21 +1,53 @@
 # FSAE Michigan EV 2026 Endurance Map
 
-Interactive satellite overlay comparing the official **FSAE Electric 2026 Endurance** course at Michigan International Speedway with the Assetto Corsa `fsae_michigan18` track.
+Interactive satellite overlay comparing the official **FSAE Electric 2026 Endurance** course at Michigan International Speedway with georeferenced course data and a **standalone Assetto Corsa track** for the 2026 EV layout.
 
 **Live map:** [https://kithek.github.io/fsae-ev-endurance-map/](https://kithek.github.io/fsae-ev-endurance-map/)
 
 Open the page, toggle layers (official EV line, AC roads/cones/walls, IC comparison), adjust opacity, and nudge placement with the on-screen controls or arrow keys. The layers panel is collapsible (click the header; state is remembered).
 
-**Assetto Corsa map:** [top-down render](https://kithek.github.io/fsae-ev-endurance-map/ac_topdown.png) · [track GeoJSON](https://kithek.github.io/fsae-ev-endurance-map/ac_track.geojson) · [download `fsae_michigan18` on OverTake](https://www.overtake.gg/downloads/authors/tomhbehrendt.294819/)
+**Assetto Corsa map (reference):** [top-down render](https://kithek.github.io/fsae-ev-endurance-map/ac_topdown.png) · [track GeoJSON](https://kithek.github.io/fsae-ev-endurance-map/ac_track.geojson)
 
-## What you can see
+## Install: Assetto Corsa track (`fsae_michigan_2026_ev`)
+
+This repository includes a **from-scratch** AC track (no dependency on `fsae_michigan18`):
+
+| Install option | Path |
+| --- | --- |
+| **Folder** | Copy [`assetto_corsa/fsae_michigan_2026_ev/`](assetto_corsa/fsae_michigan_2026_ev/) into `%Steam%/assettocorsa/content/tracks/` |
+| **Zip** | Extract [`artifacts/fsae_michigan_2026_ev.zip`](artifacts/fsae_michigan_2026_ev.zip) into `content/tracks/` |
+
+In Content Manager, select **FSAE Michigan 2026 EV Endurance** (~1.22 km lap, 20 pit boxes).
+
+### Rebuild from source
+
+Requirements: Python 3.10+, `numpy`, `Pillow`, `shapely`.
+
+```bash
+pip install numpy pillow shapely
+python3 scripts/extract_ev_cones.py      # dark linework on official map (excludes red racing line)
+python3 scripts/build_fsae_ev_track.py   # writes assetto_corsa/fsae_michigan_2026_ev/
+python3 scripts/validate_kn5_ac.py       # AcTools-aligned kn5 byte audit
+```
+
+Validation images are written to [`artifacts/`](artifacts/). Automated in-game compatibility notes: [`artifacts/INGAME_VALIDATION.md`](artifacts/INGAME_VALIDATION.md). The generated `.kn5` is re-read with [`tools/kn5.py`](tools/kn5.py).
+
+### Track contents & limitations
+
+- **Programmatic kn5 (v5)** via [`scripts/kn5_writer.py`](scripts/kn5_writer.py) (AcTools-aligned): physics `1GRASS_0` @ Y=0, `1ROAD_0` @ 0.02 m, `1WALL_0`, cone colliders **`1WALL_1`** (invisible); visuals `ROAD_0`, `GRASS_0`, `CONES_*`. Spawns **Y=0.12 m**. `models.ini`; `surfaces.ini` has **ROAD last** for physics priority. See [`artifacts/INGAME_VALIDATION.md`](artifacts/INGAME_VALIDATION.md).
+- **Spots:** `AC_START_0`–`19`, `AC_PIT_0`–`19`, `AC_TIME_0` / `AC_TIME_1` beams near start-finish and mid-course (staging aligned to traced start-finish on the official map).
+- **`data/surfaces.ini`**, **`data/map.ini`**, **`ai/fast_lane.ai`** at track root (centreline-based, optional AI support — verify in-game).
+- **Flat track:** no elevation mesh; Y-up AC coordinates; north from WGS84 ↔ AC affine fit (~2 mm at community-track spot anchors).
+- **Not verified in-game here:** physics grip, AI line quality, pit/timing gate exact placement vs rules, CSP grass shader. Please report issues after a test drive.
+
+## What you can see (web map)
 
 - Official EV 2026 endurance map georeferenced on Esri World Imagery
 - Traced EV 2026 line (~1.22 km; ~18 laps for 22 km)
-- Assetto Corsa road, physics, cones, walls, and start/pit/timing spots
+- Legacy Assetto Corsa `fsae_michigan18` geometry in `ac_track.geojson` (comparison only)
 - Optional IC 2026 map/line for comparison
 
-## Local preview
+## Local preview (web map)
 
 Serve the folder over HTTP (browsers may block local file access for tiles/scripts):
 
@@ -28,21 +60,25 @@ Then open [http://localhost:8000](http://localhost:8000). Needs internet for Lea
 ## Georeference notes
 
 - **EV map:** 30 ft grid cells ≈ 18.0 px → 0.508 m/px. Map left is NNE (Gate 50), map right is SSW (Gate 12), bearing 193.5°. Fit ±5 m to back-straight pavement edges.
-- **AC track:** placed from the kn5 embedded GoogleMap ground texture; walls match the real MIS oval (SIFT fit ~1.6 m RMS).
+- **AC track (new):** WGS84 → local ENU → AC world using the same ~1 m scale / orientation as `fsae_michigan18` spot fit; course centreline from `official_line.geojson`.
 - **Imagery:** Esri World Imagery, GeoEye-1 (Vantor/Vivid), 30 Jun 2019, 0.46 m resolution.
 
 ## Files
 
 | File | Description |
 | --- | --- |
+| `assetto_corsa/fsae_michigan_2026_ev/` | Installable AC track package |
+| `artifacts/*.png`, `artifacts/fsae_michigan_2026_ev.zip` | QA overlays and release zip |
+| `scripts/build_fsae_ev_track.py` | Track generator |
 | `index.html` / `data.js` | Interactive Leaflet viewer |
 | `official_ev_endurance_2026*.png` | Official EV 2026 endurance map |
 | `official_endurance_2026*.png` | IC 2026 map (comparison layer) |
 | `official_line.geojson` | Traced EV endurance line |
-| `ac_track.geojson` / `fsae_michigan_all.geojson` | AC track geometry |
+| `ac_track.geojson` / `fsae_michigan_all.geojson` | Legacy AC `fsae_michigan18` geometry |
 | `fsae_michigan_2026_endurance.kml` | KML export of the endurance line |
 | `overlay_*.png` / `ac_topdown.png` | Static overlay renders |
+| `tools/` | Python georef helpers (`geo.py`, `kn5.py`, imagery) |
 
 ## License / attribution
 
-Official FSAE endurance map imagery from [fsaeonline MapViewer](https://www.fsaeonline.com/). Satellite imagery © Esri, Maxar/Vantor, Earthstar Geographics. Assetto Corsa track data from `fsae_michigan18`.
+Official FSAE endurance map imagery from [fsaeonline MapViewer](https://www.fsaeonline.com/). Satellite imagery © Esri, Maxar/Vantor, Earthstar Geographics. Legacy Assetto Corsa data from community track `fsae_michigan18` (comparison only; not required to drive this mod).
